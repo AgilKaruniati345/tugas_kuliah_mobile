@@ -1,56 +1,80 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'register_page.dart';
 
 import 'task_page.dart';
 
-void main() {
-  runApp(const MyApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  SharedPreferences prefs = await SharedPreferences.getInstance();
+
+  String? token = prefs.getString('token');
+
+  runApp(MyApp(token: token));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final String? token;
+
+  const MyApp({super.key, this.token});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Task Management',
-      home: LoginPage(),
+      home: token != null ? TaskPage(token: token!) : LoginPage(),
     );
   }
 }
 
-class LoginPage extends StatelessWidget {
-  LoginPage({super.key});
+class LoginPage extends StatefulWidget {
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
 
+class _LoginPageState extends State<LoginPage> {
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
 
-  Future<void> login(BuildContext context) async {
-    final url = Uri.parse("http://192.168.1.11:8000/api/login");
+  Future<void> login() async {
+    try {
+      final response = await http.post(
+        Uri.parse("http://127.0.0.1:8000/api/login"),
+        headers: {"Accept": "application/json"},
+        body: {
+          "email": emailController.text,
+          "password": passwordController.text,
+        },
+      );
 
-    final response = await http.post(
-      url,
-      headers: {"Accept": "application/json"},
-      body: {
-        "email": emailController.text,
-        "password": passwordController.text,
-      },
-    );
+      print(response.body);
 
-    final data = jsonDecode(response.body);
+      final data = jsonDecode(response.body);
 
-    // ambil token
-    final token = data['token'];
+      if (response.statusCode == 200) {
+        final token = data['token'] ?? data['access_token'];
 
-    print("TOKEN: $token");
+        if (token != null) {
+          SharedPreferences prefs = await SharedPreferences.getInstance();
 
-    // pindah ke TaskPage
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => TaskPage(token: token)),
-    );
+          await prefs.setString('token', token);
+
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => TaskPage(token: token)),
+          );
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data['message'] ?? 'Login gagal')),
+        );
+      }
+    } catch (e) {
+      print("ERROR: $e");
+    }
   }
 
   @override
@@ -62,37 +86,31 @@ class LoginPage extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Text(
-              "Login",
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-            ),
-
-            const SizedBox(height: 20),
-
             TextField(
               controller: emailController,
-              decoration: const InputDecoration(
-                labelText: "Email",
-                border: OutlineInputBorder(),
-              ),
+              decoration: const InputDecoration(labelText: "Email"),
             ),
-
-            const SizedBox(height: 15),
-
             TextField(
               controller: passwordController,
+              decoration: const InputDecoration(labelText: "Password"),
               obscureText: true,
-              decoration: const InputDecoration(
-                labelText: "Password",
-                border: OutlineInputBorder(),
-              ),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                login();
+              },
+              child: const Text("LOGIN"),
             ),
 
-            const SizedBox(height: 20),
-
-            ElevatedButton(
-              onPressed: () => login(context),
-              child: const Text("LOGIN"),
+            TextButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const RegisterPage()),
+                );
+              },
+              child: const Text("Belum punya akun? Register"),
             ),
           ],
         ),
