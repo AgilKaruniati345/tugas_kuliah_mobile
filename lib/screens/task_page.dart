@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'main.dart';
-import 'models/task_model.dart';
+import '../main.dart';
+import '../models/task_model.dart';
 
 class TaskPage extends StatefulWidget {
   final String token;

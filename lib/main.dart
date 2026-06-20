@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'register_page.dart';
-
-import 'task_page.dart';
+import 'screens/register_page.dart';
+import 'screens/task_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
