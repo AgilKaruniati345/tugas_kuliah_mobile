@@ -4,12 +4,12 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/register_page.dart';
 import 'screens/task_page.dart';
+import 'splash_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   SharedPreferences prefs = await SharedPreferences.getInstance();
-
   String? token = prefs.getString('token');
 
   runApp(MyApp(token: token));
@@ -18,38 +18,49 @@ void main() async {
 class MyApp extends StatelessWidget {
   final String? token;
 
-  const MyApp({super.key, this.token});
+  const MyApp({
+    super.key,
+    this.token,
+  });
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: token != null ? TaskPage(token: token!) : LoginPage(),
+      home: SplashScreen(
+        token: token,
+      ),
     );
   }
 }
 
 class LoginPage extends StatefulWidget {
+  const LoginPage({super.key});
+
   @override
   State<LoginPage> createState() => _LoginPageState();
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final TextEditingController emailController = TextEditingController();
-  final TextEditingController passwordController = TextEditingController();
+  final emailController = TextEditingController();
+  final passwordController = TextEditingController();
+
+  bool isLoading = false;
 
   Future<void> login() async {
+    setState(() {
+      isLoading = true;
+    });
+
     try {
       final response = await http.post(
-        Uri.parse("http://127.0.0.1:8000/api/login"),
+        Uri.parse("http://10.0.2.2:8000/api/login"),
         headers: {"Accept": "application/json"},
         body: {
           "email": emailController.text,
           "password": passwordController.text,
         },
       );
-
-      print(response.body);
 
       final data = jsonDecode(response.body);
 
@@ -60,6 +71,8 @@ class _LoginPageState extends State<LoginPage> {
           SharedPreferences prefs = await SharedPreferences.getInstance();
 
           await prefs.setString('token', token);
+
+          if (!mounted) return;
 
           Navigator.pushReplacement(
             context,
@@ -72,7 +85,15 @@ class _LoginPageState extends State<LoginPage> {
         );
       }
     } catch (e) {
-      print("ERROR: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Tidak dapat terhubung ke server")),
+      );
+    }
+
+    if (mounted) {
+      setState(() {
+        isLoading = false;
+      });
     }
   }
 
@@ -96,12 +117,15 @@ class _LoginPageState extends State<LoginPage> {
             ),
             const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: () {
-                login();
-              },
-              child: const Text("LOGIN"),
+              onPressed: isLoading ? null : login,
+              child: isLoading
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(),
+                    )
+                  : const Text("LOGIN"),
             ),
-
             TextButton(
               onPressed: () {
                 Navigator.push(
