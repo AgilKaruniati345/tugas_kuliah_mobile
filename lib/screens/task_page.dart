@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/task_model.dart';
 import '../main.dart';
+import '../services/task_service.dart';
 
 class TaskPage extends StatefulWidget {
   final String token;
@@ -18,8 +17,6 @@ class TaskPage extends StatefulWidget {
 class _TaskPageState extends State<TaskPage> {
   List<Task> tasks = [];
   bool isLoading = true;
-
-  final String baseUrl = "http://127.0.0.1:8000/api";
 
   // ================= FORMAT DEADLINE =================
   String formatDeadline(String? iso) {
@@ -40,103 +37,74 @@ class _TaskPageState extends State<TaskPage> {
   // ================= GET TASK =================
   Future<void> getTasks() async {
     try {
-      final response = await http.get(
-        Uri.parse("$baseUrl/tasks"),
-        headers: {
-          "Accept": "application/json",
-          "Authorization": "Bearer ${widget.token}",
-        },
-      );
+      final list = await TaskService.getTasks(widget.token);
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final list = (data is List) ? data : data['data'];
-
-        setState(() {
-          tasks = list.map<Task>((e) => Task.fromJson(e)).toList();
-          isLoading = false;
-        });
-      } else {
-        setState(() => isLoading = false);
-      }
+      if (!mounted) return;
+      setState(() {
+        // Pemetaan data yang bersih tanpa memicu warning tipe data
+        tasks = list.map((e) => Task.fromJson(e)).toList();
+        isLoading = false;
+      });
     } catch (e) {
+      debugPrint("Eror saat mengambil data di UI: $e");
+      if (!mounted) return;
       setState(() => isLoading = false);
     }
   }
 
   // ================= ADD TASK =================
-  Future<void> addTask(
-    String title,
-    String description,
-    String? deadline,
-  ) async {
-    await http.post(
-      Uri.parse("$baseUrl/tasks"),
-      headers: {
-        "Accept": "application/json",
-        "Authorization": "Bearer ${widget.token}",
-      },
-      body: {"title": title, "description": description, "deadline": deadline},
-    );
-
-    getTasks();
+  Future<bool> addTask(
+      String title, String description, String? deadline) async {
+    final success =
+        await TaskService.addTask(title, description, deadline, widget.token);
+    if (success) {
+      getTasks();
+      return true;
+    }
+    return false;
   }
 
   // ================= EDIT TASK =================
-  Future<void> editTask(
-    int id,
-    String title,
-    String description,
-    String? deadline,
-  ) async {
-    await http.put(
-      Uri.parse("$baseUrl/tasks/$id"),
-      headers: {
-        "Accept": "application/json",
-        "Authorization": "Bearer ${widget.token}",
-      },
-      body: {"title": title, "description": description, "deadline": deadline},
-    );
-
-    getTasks();
+  Future<bool> editTask(
+      int id, String title, String description, String? deadline) async {
+    final success = await TaskService.updateTask(
+        id, title, description, deadline ?? '', widget.token);
+    if (success) {
+      getTasks();
+      return true;
+    }
+    return false;
   }
 
   // ================= DELETE =================
   Future<void> deleteTask(int id) async {
-    await http.delete(
-      Uri.parse("$baseUrl/tasks/$id"),
-      headers: {
-        "Accept": "application/json",
-        "Authorization": "Bearer ${widget.token}",
-      },
-    );
-
-    getTasks();
+    final success = await TaskService.deleteTask(id, widget.token);
+    if (success) {
+      getTasks();
+    }
   }
 
   // ================= LOGOUT =================
   Future<void> logout() async {
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text("Logout"),
         content: const Text("Yakin mau keluar dari aplikasi?"),
         actions: [
           TextButton(
-            onPressed: () {
-              Navigator.pop(context); // tutup dialog
-            },
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text("Batal"),
           ),
           TextButton(
             onPressed: () async {
+              final nav = Navigator.of(context);
               final prefs = await SharedPreferences.getInstance();
               await prefs.remove('token');
 
-              if (!mounted) return;
+              if (!nav.mounted) return;
 
-              Navigator.pushAndRemoveUntil(
-                context,
+              nav.pushAndRemoveUntil(
                 MaterialPageRoute(builder: (_) => const LoginPage()),
                 (route) => false,
               );
@@ -150,226 +118,48 @@ class _TaskPageState extends State<TaskPage> {
 
   // ================= ADD DIALOG =================
   void showAddDialog() {
-    final titleC = TextEditingController();
-    final descC = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-
-    DateTime? selectedDateTime;
-
     showDialog(
       context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setStateDialog) {
-          return AlertDialog(
-            title: const Text("Tambah Task"),
-            content: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextFormField(
-                    controller: titleC,
-                    decoration: const InputDecoration(labelText: "Judul"),
-                    validator: (v) =>
-                        v == null || v.isEmpty ? "Wajib diisi" : null,
-                  ),
-                  TextFormField(
-                    controller: descC,
-                    decoration: const InputDecoration(labelText: "Deskripsi"),
-                  ),
-
-                  const SizedBox(height: 10),
-
-                  ElevatedButton(
-                    onPressed: () async {
-                      final date = await showDatePicker(
-                        context: context,
-                        initialDate: DateTime.now(),
-                        firstDate: DateTime.now(),
-                        lastDate: DateTime(2100),
-                      );
-
-                      if (date == null) return;
-
-                      final time = await showTimePicker(
-                        context: context,
-                        initialTime: TimeOfDay.now(),
-                      );
-
-                      if (time == null) return;
-
-                      setStateDialog(() {
-                        selectedDateTime = DateTime(
-                          date.year,
-                          date.month,
-                          date.day,
-                          time.hour,
-                          time.minute,
-                        );
-                      });
-                    },
-                    child: const Text("Pilih Tanggal & Jam"),
-                  ),
-
-                  const SizedBox(height: 10),
-
-                  Text(
-                    selectedDateTime == null
-                        ? "Belum dipilih"
-                        : formatDeadline(selectedDateTime!.toIso8601String()),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Batal"),
-              ),
-              TextButton(
-                onPressed: () async {
-                  if (!formKey.currentState!.validate()) return;
-
-                  await addTask(
-                    titleC.text,
-                    descC.text,
-                    selectedDateTime?.toIso8601String(),
-                  );
-
-                  Navigator.pop(context);
-                },
-                child: const Text("Simpan"),
-              ),
-            ],
-          );
-        },
+      builder: (_) => _AddTaskDialog(
+        onSave: addTask,
+        formatDeadline: formatDeadline,
       ),
     );
   }
 
   // ================= EDIT DIALOG =================
   void showEditDialog(Task task) {
-    final titleC = TextEditingController(text: task.title);
-    final descC = TextEditingController(text: task.description);
-    final formKey = GlobalKey<FormState>();
-
-    DateTime? selectedDateTime = task.deadline != null
-        ? DateTime.tryParse(task.deadline!)
-        : null;
-
     showDialog(
       context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setStateDialog) {
-          return AlertDialog(
-            title: const Text("Edit Task"),
-            content: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextFormField(controller: titleC),
-                  TextFormField(controller: descC),
-
-                  const SizedBox(height: 10),
-
-                  ElevatedButton(
-                    onPressed: () async {
-                      final date = await showDatePicker(
-                        context: context,
-                        initialDate: selectedDateTime ?? DateTime.now(),
-                        firstDate: DateTime(2000),
-                        lastDate: DateTime(2100),
-                      );
-
-                      if (date == null) return;
-
-                      final time = await showTimePicker(
-                        context: context,
-                        initialTime: TimeOfDay.now(),
-                      );
-
-                      if (time == null) return;
-
-                      setStateDialog(() {
-                        selectedDateTime = DateTime(
-                          date.year,
-                          date.month,
-                          date.day,
-                          time.hour,
-                          time.minute,
-                        );
-                      });
-                    },
-                    child: const Text("Ubah Tanggal & Jam"),
-                  ),
-
-                  const SizedBox(height: 10),
-
-                  Text(
-                    selectedDateTime == null
-                        ? "-"
-                        : formatDeadline(selectedDateTime!.toIso8601String()),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Batal"),
-              ),
-              TextButton(
-                onPressed: () async {
-                  if (!formKey.currentState!.validate()) return;
-
-                  await editTask(
-                    task.id,
-                    titleC.text,
-                    descC.text,
-                    (selectedDateTime ??
-                            DateTime.parse(
-                              task.deadline ?? DateTime.now().toIso8601String(),
-                            ))
-                        .toIso8601String(),
-                  );
-
-                  Navigator.pop(context);
-                },
-                child: const Text("Update"),
-              ),
-            ],
-          );
-        },
+      builder: (_) => _EditTaskDialog(
+        task: task,
+        onUpdate: editTask,
+        formatDeadline: formatDeadline,
       ),
     );
   }
 
-  // ================= UI =================
+  // ================= UI DELETE CONFIRMATION =================
   void confirmDelete(int id) {
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text("Hapus Task?"),
         content: const Text("Data akan dihapus permanen."),
-
         actions: [
           TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-            },
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text("Batal"),
           ),
-
           TextButton(
             onPressed: () async {
+              final dialogNav = Navigator.of(dialogContext);
+              final messenger = ScaffoldMessenger.of(context);
+
               await deleteTask(id);
 
-              if (!mounted) return;
-
-              Navigator.pop(context);
-
-              ScaffoldMessenger.of(context).showSnackBar(
+              if (dialogNav.mounted) dialogNav.pop();
+              messenger.showSnackBar(
                 const SnackBar(content: Text("Data berhasil dihapus")),
               );
             },
@@ -394,69 +184,345 @@ class _TaskPageState extends State<TaskPage> {
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
-          : tasks.isEmpty
-          ? const Center(child: Text("Belum ada data"))
-          : ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: tasks.length,
-              itemBuilder: (context, i) {
-                final task = tasks[i];
-
-                return Card(
-                  child: ListTile(
-                    title: Text(task.title),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(task.description),
-                        Text("Deadline: ${formatDeadline(task.deadline)}"),
-                      ],
-                    ),
-                    onTap: () {
-                      showDialog(
-                        context: context,
-                        builder: (_) => AlertDialog(
-                          title: Text(task.title),
-                          content: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text("Deskripsi: ${task.description}"),
-                              Text(
-                                "Deadline: ${formatDeadline(task.deadline)}",
-                              ),
-                            ],
+          : RefreshIndicator(
+              onRefresh: getTasks,
+              child: tasks.isEmpty
+                  ? ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      children: const [
+                        SizedBox(height: 200),
+                        Center(
+                          child: Text(
+                            "Belum ada data\nTarik ke bawah untuk memuat ulang",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.grey, fontSize: 16),
                           ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text("Tutup"),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit),
-                          onPressed: () => showEditDialog(task),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete),
-                          onPressed: () => confirmDelete(task.id),
                         ),
                       ],
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(12),
+                      itemCount: tasks.length,
+                      itemBuilder: (context, i) {
+                        final task = tasks[i];
+
+                        return Card(
+                          child: ListTile(
+                            title: Text(task.title),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(task.description),
+                                Text(
+                                    "Deadline: ${formatDeadline(task.deadline)}"),
+                              ],
+                            ),
+                            onTap: () {
+                              showDialog(
+                                context: context,
+                                builder: (dialogContext) => AlertDialog(
+                                  title: Text(task.title),
+                                  content: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text("Deskripsi: ${task.description}"),
+                                      Text(
+                                          "Deadline: ${formatDeadline(task.deadline)}"),
+                                    ],
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(dialogContext),
+                                      child: const Text("Tutup"),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.edit),
+                                  onPressed: () => showEditDialog(task),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete),
+                                  onPressed: () => confirmDelete(task.id),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                  ),
-                );
-              },
             ),
       floatingActionButton: FloatingActionButton(
         onPressed: showAddDialog,
         child: const Icon(Icons.add),
       ),
+    );
+  }
+}
+
+class _AddTaskDialog extends StatefulWidget {
+  final Future<bool> Function(String, String, String?) onSave;
+  final String Function(String?) formatDeadline;
+
+  const _AddTaskDialog({required this.onSave, required this.formatDeadline});
+
+  @override
+  State<_AddTaskDialog> createState() => _AddTaskDialogState();
+}
+
+class _AddTaskDialogState extends State<_AddTaskDialog> {
+  final _titleC = TextEditingController();
+  final _descC = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  DateTime? _selectedDateTime;
+  bool _isSaving = false;
+
+  @override
+  void dispose() {
+    _titleC.dispose();
+    _descC.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text("Tambah Task"),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _titleC,
+              decoration: const InputDecoration(labelText: "Judul"),
+              validator: (v) => v == null || v.isEmpty ? "Wajib diisi" : null,
+            ),
+            TextFormField(
+              controller: _descC,
+              decoration: const InputDecoration(labelText: "Deskripsi"),
+            ),
+            const SizedBox(height: 15),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.calendar_month),
+              onPressed: _isSaving
+                  ? null
+                  : () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime(2100),
+                      );
+                      if (date == null || !mounted) return;
+
+                      final time = await showTimePicker(
+                        context: context,
+                        initialTime: TimeOfDay.now(),
+                      );
+                      if (time == null) return;
+
+                      setState(() {
+                        _selectedDateTime = DateTime(date.year, date.month,
+                            date.day, time.hour, time.minute);
+                      });
+                    },
+              label: Text(_selectedDateTime == null
+                  ? "Pilih Tanggal & Jam"
+                  : "Ubah: ${widget.formatDeadline(_selectedDateTime!.toIso8601String())}"),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isSaving ? null : () => Navigator.pop(context),
+          child: const Text("Batal"),
+        ),
+        ElevatedButton(
+          onPressed: _isSaving
+              ? null
+              : () async {
+                  if (!_formKey.currentState!.validate()) return;
+
+                  setState(() => _isSaving = true);
+                  final messenger = ScaffoldMessenger.of(context);
+                  final isSuccess = await widget.onSave(_titleC.text,
+                      _descC.text, _selectedDateTime?.toIso8601String());
+
+                  if (!mounted) return;
+                  setState(() => _isSaving = false);
+
+                  if (isSuccess) {
+                    Navigator.pop(context);
+                    messenger.showSnackBar(
+                      const SnackBar(
+                          content: Text("Task berhasil ditambahkan!"),
+                          backgroundColor: Colors.green),
+                    );
+                  } else {
+                    messenger.showSnackBar(
+                      const SnackBar(
+                          content: Text("Gagal menambah task!"),
+                          backgroundColor: Colors.red),
+                    );
+                  }
+                },
+          child: _isSaving
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text("Simpan"),
+        ),
+      ],
+    );
+  }
+}
+
+class _EditTaskDialog extends StatefulWidget {
+  final Task task;
+  final Future<bool> Function(int, String, String, String?) onUpdate;
+  final String Function(String?) formatDeadline;
+
+  const _EditTaskDialog(
+      {required this.task,
+      required this.onUpdate,
+      required this.formatDeadline});
+
+  @override
+  State<_EditTaskDialog> createState() => _EditTaskDialogState();
+}
+
+class _EditTaskDialogState extends State<_EditTaskDialog> {
+  late TextEditingController _titleC;
+  late TextEditingController _descC;
+  final _formKey = GlobalKey<FormState>();
+  DateTime? _selectedDateTime;
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleC = TextEditingController(text: widget.task.title);
+    _descC = TextEditingController(text: widget.task.description);
+    _selectedDateTime = widget.task.deadline != null
+        ? DateTime.tryParse(widget.task.deadline!)
+        : null;
+  }
+
+  @override
+  void dispose() {
+    _titleC.dispose();
+    _descC.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text("Edit Task"),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _titleC,
+              decoration: const InputDecoration(labelText: "Judul"),
+              validator: (v) => v == null || v.isEmpty ? "Wajib diisi" : null,
+            ),
+            TextFormField(
+              controller: _descC,
+              decoration: const InputDecoration(labelText: "Deskripsi"),
+            ),
+            const SizedBox(height: 15),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.edit_calendar),
+              onPressed: _isSaving
+                  ? null
+                  : () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: _selectedDateTime ?? DateTime.now(),
+                        firstDate: DateTime(2000),
+                        lastDate: DateTime(2100),
+                      );
+                      if (date == null || !mounted) return;
+
+                      final time = await showTimePicker(
+                        context: context,
+                        initialTime: _selectedDateTime != null
+                            ? TimeOfDay.fromDateTime(_selectedDateTime!)
+                            : TimeOfDay.now(),
+                      );
+                      if (time == null) return;
+
+                      setState(() {
+                        _selectedDateTime = DateTime(date.year, date.month,
+                            date.day, time.hour, time.minute);
+                      });
+                    },
+              label: Text(_selectedDateTime == null
+                  ? "Pilih Tanggal & Jam"
+                  : "Ubah: ${widget.formatDeadline(_selectedDateTime!.toIso8601String())}"),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isSaving ? null : () => Navigator.pop(context),
+          child: const Text("Batal"),
+        ),
+        ElevatedButton(
+          onPressed: _isSaving
+              ? null
+              : () async {
+                  if (!_formKey.currentState!.validate()) return;
+
+                  setState(() => _isSaving = true);
+                  final messenger = ScaffoldMessenger.of(context);
+                  final isSuccess = await widget.onUpdate(
+                      widget.task.id,
+                      _titleC.text,
+                      _descC.text,
+                      _selectedDateTime?.toIso8601String());
+
+                  if (!mounted) return;
+                  setState(() => _isSaving = false);
+
+                  if (isSuccess) {
+                    Navigator.pop(context);
+                    messenger.showSnackBar(
+                      const SnackBar(
+                          content: Text("Task berhasil diperbarui!"),
+                          backgroundColor: Colors.green),
+                    );
+                  } else {
+                    messenger.showSnackBar(
+                      const SnackBar(
+                          content: Text("Gagal memperbarui task!"),
+                          backgroundColor: Colors.red),
+                    );
+                  }
+                },
+          child: _isSaving
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text("Update"),
+        ),
+      ],
     );
   }
 }

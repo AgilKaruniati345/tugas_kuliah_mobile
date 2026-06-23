@@ -16,6 +16,8 @@ class _RegisterPageState extends State<RegisterPage> {
 
   Future<void> register() async {
     try {
+      // === API DIMATIKAN SEMENTARA UNTUK TESTING UI ===
+      /*
       final response = await http.post(
         Uri.parse("http://127.0.0.1:8000/api/register"),
         headers: {"Accept": "application/json"},
@@ -27,18 +29,17 @@ class _RegisterPageState extends State<RegisterPage> {
       );
 
       final data = jsonDecode(response.body);
+      */
+      // ===============================================
 
-      if (response.statusCode == 200) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text("Register berhasil")));
+      // Langsung anggap server merespons sukses (200)
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(
+          const SnackBar(content: Text("Register berhasil (Bypass)")));
 
-        Navigator.pop(context);
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['message'] ?? 'Register gagal')),
-        );
-      }
+      // Kembali ke halaman Login
+      Navigator.pop(context);
     } catch (e) {
       print(e);
     }
